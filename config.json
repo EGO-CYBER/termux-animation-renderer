@@ -1,0 +1,9 @@
+{
+  "outputDir": "output",
+  "ffmpegPreset": "veryfast",
+  "crf": 18,
+  "threads": 5,
+  "motionBlur": 1,
+  "frameFormat": "jpeg",
+  "notify": true
+}

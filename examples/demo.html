@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Demo — Termux Animation Renderer Showcase</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        overflow: hidden;
+    }
+    canvas {
+        display: block;
+    }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<script>
+// ===========================================================================
+// DEMO: "Как работает Termux Animation Renderer" — 20 секунд, 720p, 24 fps.
+//
+// Это одновременно демонстрационный ролик И живой пример того, как писать
+// animation.html: детерминированный renderFrame(time), сцены по таблице
+// тайминга, кинетическая камера (удары/дрожь/ракурсы), кинетическая
+// типографика и собственная мини-3D-проекция на Canvas 2D (без WebGL —
+// чтобы демо гарантированно рендерилось на любом устройстве).
+// ===========================================================================
+
+window.VIDEO = {
+    width: 1280,
+    height: 720,
+    fps: 24,
+    duration: 20
+};
+
+const canvas = document.getElementById('scene');
+canvas.width = window.VIDEO.width;
+canvas.height = window.VIDEO.height;
+const ctx = canvas.getContext('2d');
+
+const W = window.VIDEO.width;
+const H = window.VIDEO.height;
+const CX = W / 2;
+const CY = H / 2;
+const DURATION = window.VIDEO.duration;
+
+// ---------------------------------------------------------------------
+// Утилиты
+// ---------------------------------------------------------------------
+function makeRng(seed) {
+    let state = seed % 2147483647;
+    if (state <= 0) state += 2147483646;
+    return function next() {
+        state = (state * 16807) % 2147483647;
+        return (state - 1) / 2147483646;
+    };
+}
+
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function easeOutBack(t) {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+// Короткий "удар" 0 -> 1 -> 0 с перелётом, длится windowSec от startSec.
+function punchEnvelope(time, startSec, windowSec) {
+    const t = clamp01((time - startSec) / windowSec);
+    if (t <= 0 || t >= 1) return 0;
+    return Math.sin(Math.PI * t);
+}
+
+// ---------------------------------------------------------------------
+// Сцены — единая таблица тайминга (сумма ровно = DURATION = 20с)
+// ---------------------------------------------------------------------
+const SCENES = [
+    { name: 'intro',    start: 0.0,  end: 2.2  }, // глитч-заставка, логотип
+    { name: 'code',     start: 2.2,  end: 5.6  }, // "пишешь animation.html"
+    { name: 'parallel', start: 5.6,  end: 9.6  }, // CDP + несколько вкладок
+    { name: 'render2d3d', start: 9.6, end: 14.6 }, // 2D + 3D возможности
+    { name: 'encode',   start: 14.6, end: 17.6 }, // кадры -> FFmpeg -> MP4
+    { name: 'outro',    start: 17.6, end: 20.0 }  // финальный титр
+];
+
+function getScene(time) {
+    return SCENES.find(s => time >= s.start && time < s.end) || SCENES[SCENES.length - 1];
+}
+
+// ---------------------------------------------------------------------
+// Фоновая "техно"-сетка + частицы — общий визуальный фон для всего ролика
+// ---------------------------------------------------------------------
+const BG_PARTICLES = 70;
+const bgParticles = [];
+{
+    const rng = makeRng(7);
+    for (let i = 0; i < BG_PARTICLES; i++) {
+        bgParticles.push({
+            x: rng() * W,
+            y: rng() * H,
+            r: 0.6 + rng() * 1.8,
+            phase: rng() * Math.PI * 2,
+            speed: 0.4 + rng() * 0.8,
+            driftX: (rng() - 0.5) * 14,
+            driftY: (rng() - 0.5) * 14
+        });
+    }
+}
+
+function drawBackground(time) {
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#05060c');
+    g.addColorStop(0.55, '#0a0e1c');
+    g.addColorStop(1, '#050308');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // тонкая сетка (перспективный "пол" технологичной сцены)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(90, 160, 255, 0.07)';
+    ctx.lineWidth = 1;
+    const gridSpacing = 48;
+    const scrollY = (time * 30) % gridSpacing;
+    for (let y = -gridSpacing; y < H + gridSpacing; y += gridSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + scrollY);
+        ctx.lineTo(W, y + scrollY);
+        ctx.stroke();
+    }
+    for (let x = 0; x < W; x += gridSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    for (const p of bgParticles) {
+        const tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(time * p.speed + p.phase));
+        const x = p.x + Math.sin(time * 0.3 + p.phase) * p.driftX;
+        const y = p.y + Math.cos(time * 0.25 + p.phase) * p.driftY;
+        ctx.beginPath();
+        ctx.arc(x, y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(120, 190, 255, ${(0.15 + tw * 0.35).toFixed(3)})`;
+        ctx.fill();
+    }
+}
+
+// ---------------------------------------------------------------------
+// Камера: удар (zoom punch), дрожь (shake) и лёгкий наклон (ракурс) —
+// применяется как ctx-трансформация ДО отрисовки содержимого сцены.
+// Всё детерминировано и зависит только от time.
+// ---------------------------------------------------------------------
+function applyCamera(time, { punchAt = null, shakeAt = null, tilt = 0, zoom = 1 } = {}) {
+    ctx.translate(CX, CY);
+
+    let scale = zoom;
+    if (punchAt !== null) {
+        const env = punchEnvelope(time, punchAt, 0.28);
+        scale *= 1 + env * 0.16;
+    }
+
+    let sx = 0, sy = 0;
+    if (shakeAt !== null) {
+        const env = punchEnvelope(time, shakeAt, 0.35);
+        sx = Math.sin(time * 61.0) * 7 * env;
+        sy = Math.cos(time * 47.0) * 7 * env;
+    }
+
+    ctx.rotate(tilt);
+    ctx.scale(scale, scale);
+    ctx.translate(sx, sy);
+    ctx.translate(-CX, -CY);
+}
+
+// ---------------------------------------------------------------------
+// Кинетическая типографика: буквы "въезжают" по одной с overshoot и
+// небольшой задержкой (stagger) — целиком функция от time, без накопления.
+// ---------------------------------------------------------------------
+function drawKineticText(text, x, y, { size = 48, color = '#f2f6ff', startAt, stagger = 0.035, dur = 0.4, align = 'center', weight = '800', glow = null }) {
+    ctx.save();
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.font = `${weight} ${size}px sans-serif`;
+
+    // Сначала считаем ширины всех букв, чтобы выложить их подряд.
+    const chars = text.split('');
+    const widths = chars.map(c => ctx.measureText(c).width);
+    const totalWidth = widths.reduce((a, b) => a + b, 0);
+
+    let cursorX = align === 'center' ? x - totalWidth / 2 : x;
+
+    chars.forEach((ch, i) => {
+        const charStart = startAt + i * stagger;
+        const t = clamp01((globalRenderTime - charStart) / dur);
+        if (t <= 0) { cursorX += widths[i]; return; }
+
+        const eased = easeOutBack(t);
+        const alpha = clamp01(t / 0.6);
+        const offsetY = (1 - eased) * 40;
+        const scale = lerp(0.4, 1, Math.min(1, eased));
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(cursorX + widths[i] / 2, y + offsetY);
+        ctx.scale(scale, scale);
+        if (glow) {
+            ctx.shadowColor = glow;
+            ctx.shadowBlur = 18;
+        }
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.fillText(ch, 0, 0);
+        ctx.restore();
+
+        cursorX += widths[i];
+    });
+
+    ctx.restore();
+}
+
+// Время текущего кадра, нужно drawKineticText (просто чтобы не пробрасывать
+// time через все вызовы вручную). Выставляется в начале renderFrame.
+let globalRenderTime = 0;
+
+// ---------------------------------------------------------------------
+// СЦЕНА 1: Глитч-интро с появлением названия рендерера
+// ---------------------------------------------------------------------
+function drawGlitchBars(time, seedBase) {
+    const rng = makeRng(Math.floor(time * 24) + seedBase);
+    const barCount = 5;
+    for (let i = 0; i < barCount; i++) {
+        const y = rng() * H;
+        const h = 4 + rng() * 18;
+        const offset = (rng() - 0.5) * 60;
+        ctx.fillStyle = `rgba(${80 + rng() * 100 | 0}, ${180 + rng() * 60 | 0}, 255, ${0.12 + rng() * 0.18})`;
+        ctx.fillRect(offset, y, W, h);
+    }
+}
+
+function sceneIntro(time) {
+    const localT = clamp01(time / 2.2);
+
+    applyCamera(time, { shakeAt: 0.0, punchAt: 1.4 });
+
+    // короткая глитч-вспышка первые 0.6с, затем стихает
+    if (time < 0.7) {
+        drawGlitchBars(time, 1);
+    }
+
+    drawKineticText('TERMUX', CX, CY - 46, {
+        size: 84, startAt: 0.25, stagger: 0.05, glow: 'rgba(90,170,255,0.9)'
+    });
+    drawKineticText('ANIMATION RENDERER', CX, CY + 30, {
+        size: 40, startAt: 0.65, stagger: 0.03, color: '#9fd0ff'
+    });
+
+    const subAlpha = clamp01((time - 1.5) / 0.5);
+    ctx.save();
+    ctx.globalAlpha = subAlpha;
+    ctx.fillStyle = '#7d93b8';
+    ctx.textAlign = 'center';
+    ctx.font = '24px sans-serif';
+    ctx.fillText('HTML  →  MP4  прямо в Termux, без ПК', CX, CY + 90);
+    ctx.restore();
+}
+
+// ---------------------------------------------------------------------
+// СЦЕНА 2: "Пишешь animation.html" — стилизованный редактор кода
+// ---------------------------------------------------------------------
+const CODE_LINES = [
+    { text: 'window.VIDEO = { width, height, fps, duration };', color: '#7fd0ff' },
+    { text: 'window.renderFrame = function (time) {', color: '#e6ecff' },
+    { text: '    // сцена ПОЛНОСТЬЮ зависит только от time', color: '#5f7ba3' },
+    { text: '    drawEverything(time);', color: '#ffd27f' },
+    { text: '};', color: '#e6ecff' }
+];
+
+function sceneCode(time) {
+    const sceneStart = 2.2;
+    const localT = time - sceneStart;
+
+    applyCamera(time, { punchAt: sceneStart, tilt: -0.012 });
+
+    const panelX = 140, panelY = 150, panelW = W - 280, panelH = 420;
+    ctx.save();
+    ctx.fillStyle = 'rgba(10, 16, 30, 0.88)';
+    ctx.strokeStyle = 'rgba(100, 160, 255, 0.35)';
+    ctx.lineWidth = 2;
+    roundRect(panelX, panelY, panelW, panelH, 18);
+    ctx.fill();
+    ctx.stroke();
+
+    // "traffic light" точки редактора
+    const dotColors = ['#ff5f57', '#febc2e', '#28c840'];
+    dotColors.forEach((c, i) => {
+        ctx.beginPath();
+        ctx.arc(panelX + 26 + i * 24, panelY + 28, 7, 0, Math.PI * 2);
+        ctx.fillStyle = c;
+        ctx.fill();
+    });
+
+    ctx.fillStyle = '#5f7ba3';
+    ctx.font = '18px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('animation.html', panelX + 26, panelY + 64);
+
+    // построчная печать текста (typewriter), каждая строка стартует чуть позже
+    ctx.font = '22px monospace';
+    const lineHeight = 46;
+    CODE_LINES.forEach((line, i) => {
+        const lineStart = 0.5 + i * 0.55;
+        const charsPerSec = 55;
+        const revealCount = Math.floor(clamp01((localT - lineStart)) * charsPerSec);
+        if (revealCount <= 0) return;
+        const shown = line.text.slice(0, revealCount);
+        ctx.fillStyle = line.color;
+        ctx.fillText(shown, panelX + 26, panelY + 120 + i * lineHeight);
+
+        // мигающий курсор в конце ещё печатающейся строки
+        if (revealCount < line.text.length) {
+            const blink = Math.sin(time * 12) > 0;
+            if (blink) {
+                const w = ctx.measureText(shown).width;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(panelX + 26 + w + 2, panelY + 102 + i * lineHeight, 10, 26);
+            }
+        }
+    });
+    ctx.restore();
+
+    drawKineticText('AI (или ты сам) пишет один HTML-файл', CX, panelY + panelH + 60, {
+        size: 26, startAt: sceneStart + 2.6, stagger: 0.012, color: '#c9d8f2'
+    });
+}
+
+function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+// ---------------------------------------------------------------------
+// СЦЕНА 3: Параллельный рендер — несколько вкладок Chromium через CDP
+// ---------------------------------------------------------------------
+function sceneParallel(time) {
+    const sceneStart = 5.6;
+    const localT = time - sceneStart;
+
+    applyCamera(time, { punchAt: sceneStart, shakeAt: sceneStart + 0.05, tilt: 0.01 });
+
+    drawKineticText('HEADLESS CHROMIUM + CDP', CX, 130, {
+        size: 40, startAt: sceneStart + 0.1, stagger: 0.02, glow: 'rgba(90,170,255,0.7)'
+    });
+    drawKineticText('несколько вкладок — параллельный рендер кадров', CX, 178, {
+        size: 22, startAt: sceneStart + 0.6, stagger: 0.012, color: '#9fb6d9'
+    });
+
+    const tabCount = 4;
+    const tabW = 190, tabH = 130;
+    const totalW = tabCount * tabW + (tabCount - 1) * 40;
+    const startX = CX - totalW / 2;
+    const tabY = 300;
+
+    // центральный узел CDP
+    const nodeX = CX, nodeY = tabY + tabH + 110;
+
+    for (let i = 0; i < tabCount; i++) {
+        const appearAt = sceneStart + 1.1 + i * 0.18;
+        const t = clamp01((time - appearAt) / 0.35);
+        if (t <= 0) continue;
+        const eased = easeOutBack(t);
+        const x = startX + i * (tabW + 40);
+        const y = tabY;
+
+        // линия к центральному узлу CDP
+        ctx.save();
+        ctx.globalAlpha = clamp01(t);
+        ctx.strokeStyle = 'rgba(100,170,255,0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + tabW / 2, y + tabH);
+        ctx.lineTo(nodeX, nodeY);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(x + tabW / 2, y + tabH / 2);
+        ctx.scale(eased, eased);
+        ctx.translate(-tabW / 2, -tabH / 2);
+
+        ctx.fillStyle = 'rgba(16, 24, 42, 0.95)';
+        ctx.strokeStyle = '#4f8fff';
+        ctx.lineWidth = 2;
+        roundRect(0, 0, tabW, tabH, 14);
+        ctx.fill();
+        ctx.stroke();
+
+        // мини "прогресс" рендера кадров этой вкладки — заполняется со сдвигом по фазе
+        const progress = clamp01((time - appearAt - 0.4) / 2.2);
+        ctx.fillStyle = '#0b1220';
+        ctx.fillRect(16, tabH - 34, tabW - 32, 14);
+        ctx.fillStyle = '#57e389';
+        ctx.fillRect(16, tabH - 34, (tabW - 32) * progress, 14);
+
+        ctx.fillStyle = '#dce8ff';
+        ctx.font = '16px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`tab ${i + 1}`, 16, 34);
+        ctx.fillStyle = '#7fa6e0';
+        ctx.font = '13px monospace';
+        ctx.fillText(`${Math.round(progress * 100)}%`, 16, 56);
+        ctx.restore();
+    }
+
+    const nodeAppear = clamp01((time - sceneStart - 1.9) / 0.3);
+    if (nodeAppear > 0) {
+        ctx.save();
+        ctx.globalAlpha = nodeAppear;
+        const r = 46 * easeOutBack(nodeAppear);
+        const glow = ctx.createRadialGradient(nodeX, nodeY, 4, nodeX, nodeY, r * 2.4);
+        glow.addColorStop(0, 'rgba(90,170,255,0.5)');
+        glow.addColorStop(1, 'rgba(90,170,255,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(nodeX, nodeY, r * 2.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(nodeX, nodeY, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f1830';
+        ctx.strokeStyle = '#7fd0ff';
+        ctx.lineWidth = 3;
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#eaf4ff';
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('CDP', nodeX, nodeY);
+        ctx.restore();
+    }
+}
+
+// ---------------------------------------------------------------------
+// СЦЕНА 4: 2D + 3D — слева морфинг частиц (2D), справа вращающийся куб (3D)
+// ---------------------------------------------------------------------
+// Мини-3D: собственная проекция без WebGL — вершины куба поворачиваются
+// вокруг X/Y как функция от time и проецируются в экранные координаты.
+const CUBE_VERTS = [
+    [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1],
+    [-1,-1,1],  [1,-1,1],  [1,1,1],  [-1,1,1]
+];
+const CUBE_FACES = [
+    { idx: [0,1,2,3], color: [90,170,255] },  // задняя
+    { idx: [4,5,6,7], color: [120,200,255] }, // передняя
+    { idx: [0,1,5,4], color: [70,130,220] },  // низ
+    { idx: [2,3,7,6], color: [140,210,255] }, // верх
+    { idx: [1,2,6,5], color: [100,180,255] }, // право
+    { idx: [0,3,7,4], color: [60,110,190] }   // лево
+];
+
+function rotatePoint([x, y, z], ax, ay) {
+    // поворот вокруг оси Y
+    let cx = x * Math.cos(ay) + z * Math.sin(ay);
+    let cz = -x * Math.sin(ay) + z * Math.cos(ay);
+    // поворот вокруг оси X
+    let cy = y * Math.cos(ax) - cz * Math.sin(ax);
+    cz = y * Math.sin(ax) + cz * Math.cos(ax);
+    return [cx, cy, cz];
+}
+
+function drawCube(time, centerX, centerY, size) {
+    const angleY = time * 0.9;
+    const angleX = time * 0.55;
+
+    const projected = CUBE_VERTS.map(v => {
+        const [x, y, z] = rotatePoint(v, angleX, angleY);
+        const perspective = 4 / (4 + z); // простая перспектива
+        return {
+            x: centerX + x * size * perspective,
+            y: centerY + y * size * perspective,
+            z
+        };
+    });
+
+    // сортируем грани по средней глубине (painter's algorithm) — дальние первыми
+    const facesWithDepth = CUBE_FACES.map(f => {
+        const avgZ = f.idx.reduce((s, i) => s + projected[i].z, 0) / f.idx.length;
+        return { ...f, avgZ };
+    }).sort((a, b) => b.avgZ - a.avgZ);
+
+    for (const face of facesWithDepth) {
+        const pts = face.idx.map(i => projected[i]);
+        // простое плоское освещение по глубине грани
+        const light = clamp01(0.5 + face.avgZ * 0.25);
+        const [r, g, b] = face.color;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${Math.round(r*light)}, ${Math.round(g*light)}, ${Math.round(b*light)}, 0.95)`;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(230,245,255,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+}
+
+const MORPH_PARTICLE_COUNT = 90;
+const morphParticles = [];
+{
+    const rng = makeRng(555);
+    for (let i = 0; i < MORPH_PARTICLE_COUNT; i++) {
+        const angle = (i / MORPH_PARTICLE_COUNT) * Math.PI * 2;
+        morphParticles.push({
+            angle,
+            radiusBase: 60 + rng() * 40,
+            speed: 0.6 + rng() * 0.8,
+            size: 1.5 + rng() * 2.5,
+            hueShift: rng() * 40
+        });
+    }
+}
+
+function draw2DMorph(time, cx, cy) {
+    const t = time;
+    for (const p of morphParticles) {
+        // радиус "дышит" — форма перетекает между кругом и звездой
+        const starFactor = 0.5 + 0.5 * Math.sin(t * 0.7);
+        const spikiness = Math.sin(p.angle * 6 + t * p.speed) * 18 * starFactor;
+        const r = p.radiusBase + spikiness + Math.sin(t * p.speed + p.angle) * 10;
+        const a = p.angle + t * 0.3;
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r;
+        const hue = 200 + p.hueShift + Math.sin(t + p.angle) * 20;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${hue}, 90%, 65%, 0.85)`;
+        ctx.fill();
+    }
+}
+
+function scene2d3d(time) {
+    const sceneStart = 9.6;
+    const half = (14.6 - 9.6) / 2; // делим сцену на "2D" и "3D" половины с быстрой сменой акцента
+
+    applyCamera(time, { punchAt: sceneStart });
+
+    drawKineticText('2D  И  3D  В  ОДНОМ  РЕНДЕРЕРЕ', CX, 110, {
+        size: 34, startAt: sceneStart + 0.1, stagger: 0.015, glow: 'rgba(90,170,255,0.7)'
+    });
+
+    const leftCX = W * 0.28, rightCX = W * 0.72, midY = 430;
+
+    // акцентная рамка переключается между половинами (быстрый "удар" внимания)
+    const focusLeft = ((time - sceneStart) % (half * 2)) < half;
+
+    draw2DMorph(time, leftCX, midY);
+    drawCube(time, rightCX, midY, 90);
+
+    ctx.save();
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = focusLeft ? '#eaf4ff' : '#5f7ba3';
+    ctx.fillText('CANVAS 2D', leftCX, midY + 150);
+    ctx.fillStyle = focusLeft ? '#5f7ba3' : '#eaf4ff';
+    ctx.fillText('3D-ПРОЕКЦИЯ', rightCX, midY + 150);
+    ctx.restore();
+
+    // рамка-акцент вокруг активной половины
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,200,255,0.55)';
+    ctx.lineWidth = 3;
+    const boxW = 340, boxH = 340;
+    const boxX = (focusLeft ? leftCX : rightCX) - boxW / 2;
+    roundRect(boxX, midY - boxH / 2, boxW, boxH, 24);
+    ctx.stroke();
+    ctx.restore();
+}
+
+// ---------------------------------------------------------------------
+// СЦЕНА 5: Кадры → FFmpeg → MP4
+// ---------------------------------------------------------------------
+function sceneEncode(time) {
+    const sceneStart = 14.6;
+    const localT = time - sceneStart;
+
+    applyCamera(time, { punchAt: sceneStart, shakeAt: sceneStart + 2.6 });
+
+    drawKineticText('FFMPEG СОБИРАЕТ ВИДЕО', CX, 120, {
+        size: 38, startAt: sceneStart + 0.1, stagger: 0.02, glow: 'rgba(90,170,255,0.7)'
+    });
+
+    // сетка PNG-кадров, быстро заполняющаяся (демонстрация скорости)
+    const cols = 12, rows = 5;
+    const cellW = 46, cellH = 30, gap = 8;
+    const gridW = cols * (cellW + gap) - gap;
+    const gridX = CX - gridW / 2;
+    const gridY = 190;
+    const totalCells = cols * rows;
+    const fillProgress = clamp01(localT / 2.2);
+    const filledCells = Math.floor(fillProgress * totalCells);
+
+    for (let i = 0; i < totalCells; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = gridX + col * (cellW + gap);
+        const y = gridY + row * (cellH + gap);
+        const filled = i < filledCells;
+        ctx.fillStyle = filled ? 'rgba(90,220,150,0.9)' : 'rgba(255,255,255,0.06)';
+        roundRect(x, y, cellW, cellH, 4);
+        ctx.fill();
+    }
+
+    ctx.fillStyle = '#9fb6d9';
+    ctx.font = '18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.min(totalCells, filledCells)} / ${totalCells} кадров записано`, CX, gridY + rows * (cellH + gap) + 30);
+
+    // прогресс-бар кодирования
+    const barY = gridY + rows * (cellH + gap) + 70;
+    const barW = 460, barH = 22;
+    const encodeProgress = clamp01((localT - 1.8) / 1.0);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    roundRect(CX - barW / 2, barY, barW, barH, 11);
+    ctx.fill();
+    ctx.fillStyle = '#57e389';
+    roundRect(CX - barW / 2, barY, barW * encodeProgress, barH, 11);
+    ctx.fill();
+
+    if (encodeProgress > 0.98) {
+        const pulse = 0.5 + 0.5 * Math.sin(time * 10);
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillStyle = `rgba(120, ${200 + pulse * 55 | 0}, 255, 1)`;
+        ctx.fillText('video.mp4 готово', CX, barY + 60);
+        ctx.restore();
+    }
+}
+
+// ---------------------------------------------------------------------
+// СЦЕНА 6: Финальный титр
+// ---------------------------------------------------------------------
+function sceneOutro(time) {
+    const sceneStart = 17.6;
+
+    applyCamera(time, { punchAt: sceneStart });
+
+    drawKineticText('TERMUX ANIMATION RENDERER', CX, CY - 20, {
+        size: 52, startAt: sceneStart + 0.1, stagger: 0.02, glow: 'rgba(90,170,255,0.9)'
+    });
+    drawKineticText('Быстрый рендер прямо на телефоне', CX, CY + 40, {
+        size: 24, startAt: sceneStart + 1.0, stagger: 0.012, color: '#9fb6d9'
+    });
+
+    // затухание в чёрное в последние 0.6с ролика
+    const fadeOut = clamp01((time - (DURATION - 0.6)) / 0.6);
+    if (fadeOut > 0) {
+        ctx.save();
+        ctx.globalAlpha = fadeOut;
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+    }
+}
+
+// ---------------------------------------------------------------------
+// Кроссфейд между соседними сценами: рисуем текущую и, в последние N сек,
+// подмешиваем следующую поверх с нарастающей прозрачностью — так резкие
+// смены (hard cut) остаются резкими там, где это задумано, а конкретные
+// переходы, где нужна мягкость, всё равно можно смягчить самим contentом.
+// ---------------------------------------------------------------------
+const SCENE_DRAWERS = {
+    intro: sceneIntro,
+    code: sceneCode,
+    parallel: sceneParallel,
+    render2d3d: scene2d3d,
+    encode: sceneEncode,
+    outro: sceneOutro
+};
+
+window.renderFrame = function (time) {
+    globalRenderTime = time;
+
+    ctx.clearRect(0, 0, W, H);
+    drawBackground(time);
+
+    const scene = getScene(time);
+    ctx.save();
+    SCENE_DRAWERS[scene.name](time);
+    ctx.restore();
+
+    // тонкая виньетка для кинематографичности
+    ctx.save();
+    const vg = ctx.createRadialGradient(CX, CY, H * 0.35, CX, CY, H * 0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+};
+
+// Первый кадр сразу — чтобы страница не была пустой при обычном открытии
+// в браузере (на CDP-рендер не влияет).
+window.renderFrame(0);
+</script>
+</body>
+</html>

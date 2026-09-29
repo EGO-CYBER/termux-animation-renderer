@@ -1,0 +1,36 @@
+{
+  "name": "termux-animation-renderer",
+  "version": "2.0.0",
+  "description": "Рендерит HTML/Canvas/SVG/WebGL-анимации в MP4 на Android (Termux) через Chromium CDP и FFmpeg",
+  "type": "module",
+  "main": "src/main.js",
+  "bin": {
+    "anim": "./anim"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/main.js"
+  },
+  "keywords": [
+    "termux",
+    "android",
+    "animation",
+    "renderer",
+    "chrome-devtools-protocol",
+    "cdp",
+    "ffmpeg",
+    "canvas",
+    "svg",
+    "webgl",
+    "mp4"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EGO-CYBER/termux-animation-renderer.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

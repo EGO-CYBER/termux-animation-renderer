@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# anim - запуск Termux Animation Renderer (меню или команды).
+# Читает символические ссылки, поэтому работает и из $PREFIX/bin.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+exec node "$SCRIPT_DIR/src/main.js" "$@"

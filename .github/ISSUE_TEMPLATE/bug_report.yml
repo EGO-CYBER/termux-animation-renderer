@@ -1,0 +1,99 @@
+name: 🐛 Сообщить о баге
+description: Что-то сломалось при рендере, установке или работе программы
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Опишите проблему своими словами — что вы делали и что получилось вместо этого.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что ожидалось
+      description: Как должно было сработать по-вашему.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Как воспроизвести
+      description: Шаги, начиная с чистого состояния. Команды — в блоке кода.
+      placeholder: |
+        1. Открыть меню: anim
+        2. Выбрать "Рендер"
+        3. Запустить на файле examples/demo.html
+    validations:
+      required: true
+
+  - type: input
+    id: animation
+    attributes:
+      label: Файл анимации
+      description: Если проблема в конкретном HTML-файле — приложите его (или минимальный пример, который ломается).
+      placeholder: animation.html
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Лог
+      description: |
+        Вывод команды с включённым журналом. Лог лежит в ~/tr-debug.log.
+        ⚠ Убедитесь, что там нет ваших токенов и личных путей.
+      render: shell
+      placeholder: |
+        $ TR_DEBUG=1 anim render animation.html
+        ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия проекта
+      placeholder: v2.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: android
+    attributes:
+      label: Версия Android
+      placeholder: Android 14
+
+  - type: input
+    id: termux
+    attributes:
+      label: Версия Termux / Node.js / FFmpeg
+      placeholder: Termux 0.118.2, Node 22.9.0, FFmpeg 6.0
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Устройство и процессор
+      description: Модель телефона и, если знаете, число ядер.
+      placeholder: Samsung Galaxy A52, 8 ядер
+
+  - type: input
+    id: chromium
+    attributes:
+      label: Версия Chromium
+      description: Вывод команды: chromium --version
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверил
+      options:
+        - label: Запустил `anim selftest` и приложил вывод, если он падает
+          required: false
+        - label: Проблема воспроизводится и на чистой установке (`bash install.sh`)
+          required: false
+        - label: Поискал похожие issue — такого ещё нет
+          required: false

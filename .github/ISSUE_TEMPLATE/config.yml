@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Вопрос и обсуждение
+    url: https://github.com/EGO-CYBER/termux-animation-renderer/discussions
+    about: Задайте вопрос или обсудите идею — для этого есть Discussions.
+  - name: 🐛 Сообщить о баге
+    url: https://github.com/EGO-CYBER/termux-animation-renderer/issues/new?template=bug_report.yml
+    about: Убедитесь, что в шаблоне заполнен лог с `TR_DEBUG=1` — он почти всегда содержит ответ.
+  - name: 💡 Предложить идею
+    url: https://github.com/EGO-CYBER/termux-animation-renderer/issues/new?template=feature_request.yml
+    about: Опишите задачу, которую не удаётся решить текущими возможностями.

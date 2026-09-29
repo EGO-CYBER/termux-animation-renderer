@@ -1,0 +1,58 @@
+name: 💡 Предложить идею
+description: Новая функция, улучшение или пример анимации
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: Опишите ситуацию, в которой вам чего-то не хватает. Не сам способ решения, а проблему.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Что предлагаете
+      description: Как выглядел бы результат. Если есть идея по интерфейсу или команде — опишите её.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Сейчас я делаю это так
+      description: Если уже пользуетесь обходным путём — расскажите какой. Это лучшие идеи.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Область
+      options:
+        - Рендер и производительность
+        - WebGL / Canvas / SVG
+        - Звук и видео (MP4, кодеки, CRF)
+        - Интерфейс и меню
+        - Установка и совместимость
+        - Примеры анимаций
+        - Документация
+        - Другое
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Ограничения проекта
+      description: |
+        Проект намеренно обходится без Puppeteer и Playwright и рассчитан
+        на телефон с ограниченной памятью. Отметьте, если учли это.
+      options:
+        - label: Не потребует Puppeteer / Playwright
+          required: false
+        - label: Будет работать на устройстве с 2 ГБ ОЗУ
+          required: false
+        - label: Готова взять на себя реализацию и PR
+          required: false
